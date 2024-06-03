@@ -1,56 +1,80 @@
 // This file is part of KASLD - https://github.com/bcoles/kasld
-// Check kernel config for CONFIG_RELOCATABLE and CONFIG_RANDOMIZE_BASE
-// - https://lwn.net/Articles/444556/
-// - https://cateee.net/lkddb/web-lkddb/RANDOMIZE_BASE.html
-// - https://cateee.net/lkddb/web-lkddb/RELOCATABLE.html
+//
+// Check kernel config for both CONFIG_RELOCATABLE and CONFIG_RANDOMIZE_BASE.
+//
+// References:
+// https://lwn.net/Articles/444556/
+// https://cateee.net/lkddb/web-lkddb/RANDOMIZE_BASE.html
+// https://cateee.net/lkddb/web-lkddb/RELOCATABLE.html
 // ---
 // <bcoles@gmail.com>
 
+#include "include/kasld.h"
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/utsname.h>
 
-struct utsname get_kernel_version() {
-  struct utsname u;
-  if (uname(&u) != 0) {
-    printf("[-] uname(): %m\n");
-    exit(1);
-  }
-  return u;
-}
+// from:
+// https://stackoverflow.com/questions/22240476/checking-linux-kernel-config-at-runtime
+static int is_kconfig_set(const char *config) {
+  int ret = 0;
+  struct utsname utsname;
+  char pattern[BUFSIZ], buf[BUFSIZ];
+  FILE *fp = NULL;
 
-unsigned long get_kernel_addr_cmdline() {
-  unsigned long addr = 0;
+  if (uname(&utsname) == -1)
+    return -1;
 
-  printf("[.] checking /boot/config ...\n");
+  memset(pattern, 0, sizeof(pattern));
+  memset(buf, 0, sizeof(buf));
+  sprintf(pattern, "%s=y", config);
+  sprintf(buf, "/boot/config-%s", utsname.release);
 
-  if (system("test -r /boot/config-$(uname -r)") != 0)
-    return 0;
-  if (system("grep -q CONFIG_RELOCATABLE=y /boot/config-$(uname -r) && grep -q CONFIG_RANDOMIZE_BASE=y /boot/config-$(uname -r)") == 0)
-    return 0;
+  printf("[.] checking %s for %s... \n", buf, config);
 
-  printf("[.] Kernel appears to have been compiled without CONFIG_RELOCATABLE and CONFIG_RANDOMIZE_BASE\n");
-
-  struct utsname u = get_kernel_version();
-
-  if (strstr(u.machine, "64") != NULL) {
-    addr = 0xffffffff81000000;
-  } else if (strstr(u.machine, "86") != NULL) {
-    addr = 0xc1000000ul;
-  } else {
-    printf("[.] kernel base for arch '%s' is unknown\n", u.machine);
+  fp = fopen(buf, "r");
+  if (fp == NULL) {
+    perror("[-] fopen");
+    return -1;
   }
 
-  return addr;
+  while (fgets(buf, sizeof(buf), fp) != NULL) {
+    if (strncmp(buf, pattern, strlen(pattern)) == 0) {
+      ret = 1;
+      break;
+    }
+  }
+
+  fclose(fp);
+  return ret;
 }
 
-int main (int argc, char **argv) {
-  unsigned long addr = get_kernel_addr_cmdline();
-  if (!addr) return 1;
+unsigned long get_kernel_addr_boot_config() {
+  int relocatable = is_kconfig_set("CONFIG_RELOCATABLE");
+  if (relocatable == -1)
+    return 0;
 
-  printf("kernel base (likely): %lx\n", addr);
+  int randomize_base = is_kconfig_set("CONFIG_RANDOMIZE_BASE");
+  if (randomize_base == -1)
+    return 0;
+
+  if (relocatable && randomize_base)
+    return 0;
+
+  printf("[.] Kernel appears to have been compiled without both "
+         "CONFIG_RELOCATABLE and CONFIG_RANDOMIZE_BASE\n");
+
+  return (unsigned long)KERNEL_TEXT_DEFAULT;
+}
+
+int main() {
+  unsigned long addr = get_kernel_addr_boot_config();
+  if (!addr)
+    return 1;
+
+  printf("common default kernel text for arch: %lx\n", addr);
 
   return 0;
 }
-

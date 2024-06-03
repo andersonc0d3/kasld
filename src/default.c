@@ -1,44 +1,24 @@
 // This file is part of KASLD - https://github.com/bcoles/kasld
-// Print default kernel base virtual address
+//
+// Print architecture default kernel base text virtual address
 // ---
 // <bcoles@gmail.com>
 
+#include "include/kasld.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/utsname.h>
-
-struct utsname get_kernel_version() {
-  struct utsname u;
-  if (uname(&u) != 0) {
-    printf("[-] uname(): %m\n");
-    exit(1);
-  }
-  return u;
-}
 
 unsigned long get_kernel_addr_default() {
-  unsigned long addr = 0;
-  struct utsname u = get_kernel_version();
-
-  if (strstr(u.machine, "64") != NULL) {
-    addr = 0xffffffff81000000;
-  } else if (strstr(u.machine, "86") != NULL) {
-    addr = 0xc1000000ul;
-    // addr = 0xc0400000ul; /* old kernels (pre-kaslr?) */
-  } else {
-    printf("[.] kernel base for arch '%s' is unknown\n", u.machine);
-  }
-
-  return addr;
+  return (unsigned long)KERNEL_TEXT_DEFAULT;
 }
 
-int main (int argc, char **argv) {
+int main() {
   unsigned long addr = get_kernel_addr_default();
-  if (!addr) return 1;
+  if (!addr)
+    return 1;
 
-  printf("kernel base (arch default): %lx\n", addr);
+  printf("common default kernel text for arch: %lx\n", addr);
 
   return 0;
 }
-

